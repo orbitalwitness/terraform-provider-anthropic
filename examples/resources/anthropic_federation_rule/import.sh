@@ -1,0 +1,1 @@
+terraform import anthropic_federation_rule.deploy fdrl_example

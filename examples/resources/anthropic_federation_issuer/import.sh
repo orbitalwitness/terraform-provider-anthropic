@@ -1,0 +1,1 @@
+terraform import anthropic_federation_issuer.github fdis_example
