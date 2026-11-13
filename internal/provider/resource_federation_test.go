@@ -104,6 +104,10 @@ func TestFederationResources(t *testing.T) {
 	}))
 	defer server.Close()
 	config := func(updated bool) string {
+		scope := "workspace:inference"
+		if updated {
+			scope = "workspace:developer"
+		}
 		issuerName, ruleName, description, jwks, match := "github", "deploy", `description = "deployment"`, "", `claims = { repository = "example/app" }`
 		if updated {
 			issuerName, ruleName, description, jwks, match = "github-updated", "deploy-updated", "", `jwks_url = "https://example.com/jwks.json"`, `subject_prefix = "repo:example/app:*"`
@@ -124,16 +128,17 @@ resource "anthropic_federation_rule" "test" {
  issuer_id = anthropic_federation_issuer.test.id
  service_account_id = "svac_test"
  workspace_id = "wrkspc_test"
- oauth_scope = "workspace:inference"
+ oauth_scope = %q
  %s
  match = { %s }
 }
-`, server.URL, issuerName, jwks, ruleName, description, match)
+`, server.URL, issuerName, jwks, ruleName, scope, description, match)
 	}
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{Config: config(false), Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("anthropic_federation_rule.test", "oauth_scope", "workspace:inference"),
 				resource.TestCheckResourceAttr("anthropic_federation_issuer.test", "check_jti", "true"),
 				resource.TestCheckResourceAttr("anthropic_federation_rule.test", "token_lifetime_seconds", "3600"),
 				resource.TestCheckResourceAttr("anthropic_federation_rule.test", "match.claims.repository", "example/app"),
@@ -141,10 +146,13 @@ resource "anthropic_federation_rule" "test" {
 			{ResourceName: "anthropic_federation_issuer.test", ImportState: true, ImportStateVerify: true},
 			{ResourceName: "anthropic_federation_rule.test", ImportState: true, ImportStateVerify: true},
 			{Config: config(true), Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("anthropic_federation_rule.test", "oauth_scope", "workspace:developer"),
 				resource.TestCheckResourceAttr("anthropic_federation_issuer.test", "jwks_url", "https://example.com/jwks.json"),
 				resource.TestCheckNoResourceAttr("anthropic_federation_rule.test", "description"),
 				resource.TestCheckNoResourceAttr("anthropic_federation_rule.test", "match.claims"),
 			)},
+			{Config: config(false)},
+			{PreConfig: func() { mu.Lock(); objects["federation_rules"]["oauth_scope"] = "workspace:developer"; mu.Unlock() }, Config: config(false), PlanOnly: true, ExpectNonEmptyPlan: true},
 			{Config: config(false)},
 		},
 	})

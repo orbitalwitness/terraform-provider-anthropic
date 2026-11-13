@@ -1,0 +1,57 @@
+Local plan with the pinned provider source build, dummy OAuth bearer and empty local state; no vendor API calls or apply.
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # anthropic_federation_rule.runtime will be created
+  + resource "anthropic_federation_rule" "runtime" {
+      + id                     = (known after apply)
+      + issuer_id              = "fdis_example"
+      + match                  = {
+          + audience = "https://api.anthropic.com"
+          + claims   = {
+              + "sub" = "example-workload"
+            }
+        }
+      + name                   = "preprod-inference"
+      + oauth_scope            = "workspace:inference"
+      + service_account_id     = (known after apply)
+      + token_lifetime_seconds = 600
+      + workspace_id           = "wrkspc_example"
+    }
+
+  # anthropic_service_account.runtime will be created
+  + resource "anthropic_service_account" "runtime" {
+      + archived_at          = (known after apply)
+      + archived_by_actor_id = (known after apply)
+      + created_at           = (known after apply)
+      + created_by_actor_id  = (known after apply)
+      + id                   = (known after apply)
+      + name                 = "preprod-inference"
+      + organization_role    = "developer"
+      + updated_at           = (known after apply)
+      + updated_by_actor_id  = (known after apply)
+    }
+
+  # anthropic_service_account_workspace_member.runtime will be created
+  + resource "anthropic_service_account_workspace_member" "runtime" {
+      + created_by_actor_id = (known after apply)
+      + implicit            = (known after apply)
+      + service_account_id  = (known after apply)
+      + workspace_id        = "wrkspc_example"
+      + workspace_role      = "workspace_restricted_developer"
+    }
+
+Plan: 3 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + runtime_identity = {
+      + federation_rule_id = (known after apply)
+      + service_account_id = (known after apply)
+      + workspace_id       = "wrkspc_example"
+    }
+
+─────────────────────────────────────────────────────────────────────────────
