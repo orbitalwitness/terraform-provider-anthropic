@@ -15,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
-	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/providerdata"
 )
 
@@ -130,12 +129,6 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		AuthToken:       authToken,
 		ApiKeyClient:    &apiKeyClient,
 		AuthTokenClient: &authTokenClient,
-
-		ServiceAccounts: apiclient.NewListCache(func(v anthropic.ServiceAccount) string { return v.ID }),
-		ServiceAccountWorkspaceMembers: apiclient.NewListCache(func(v anthropic.ServiceAccountWorkspaceMember) string {
-			return v.ServiceAccountID
-		}),
-		FederationRules: apiclient.NewListCache(func(v anthropic.FederationRule) string { return v.ID }),
 	}
 
 	resp.DataSourceData = providerData

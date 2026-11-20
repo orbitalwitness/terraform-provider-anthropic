@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 )
 
 // Exercise Terraform plans and state against the SDK's real HTTP transport.
@@ -195,10 +194,7 @@ func TestFederationReadMissingAndArchived(t *testing.T) {
 					r = &FederationIssuerResource{baseResource: baseResource{base: base{authTokenClient: &client}}}
 					model = &FederationIssuerModel{Id: types.StringValue("test")}
 				} else {
-					r = &FederationRuleResource{baseResource: baseResource{
-						base:            base{authTokenClient: &client},
-						federationRules: apiclient.NewListCache(func(v anthropic.FederationRule) string { return v.ID }),
-					}}
+					r = &FederationRuleResource{baseResource: baseResource{base: base{authTokenClient: &client}}}
 					model = &FederationRuleModel{Id: types.StringValue("test")}
 				}
 				var schemaResp frameworkresource.SchemaResponse
