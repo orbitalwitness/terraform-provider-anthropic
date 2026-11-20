@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,8 +14,14 @@ func TestCachedGet(t *testing.T) {
 	client := &anthropic.Client{}
 	var calls atomic.Int32
 	list := func(context.Context) (map[string]string, error) {
-		calls.Add(1)
+		if calls.Add(1) == 1 {
+			return nil, errors.New("list failed")
+		}
 		return map[string]string{"a": "alpha"}, nil
+	}
+
+	if _, err := cachedGet(t.Context(), client, "scope", "a", list); err == nil {
+		t.Error("a failed list must return its error")
 	}
 
 	var wg sync.WaitGroup
@@ -27,8 +34,8 @@ func TestCachedGet(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if calls.Load() != 1 {
-		t.Errorf("expected one list call, got %d", calls.Load())
+	if calls.Load() != 2 {
+		t.Errorf("expected a failed list to be retried once, got %d calls", calls.Load())
 	}
 
 	if item, err := cachedGet(t.Context(), client, "scope", "missing", list); err != nil || item != nil {
@@ -36,7 +43,7 @@ func TestCachedGet(t *testing.T) {
 	}
 
 	invalidateList(client, "scope")
-	if _, err := cachedGet(t.Context(), client, "scope", "a", list); err != nil || calls.Load() != 2 {
+	if _, err := cachedGet(t.Context(), client, "scope", "a", list); err != nil || calls.Load() != 3 {
 		t.Errorf("invalidate must force a new list call, got %d calls, err %v", calls.Load(), err)
 	}
 }

@@ -30,7 +30,7 @@ func invalidateList(client *anthropic.Client, scope string) {
 // it succeeds or the scope is invalidated. A nil item means the ID is absent from the list.
 func cachedGet[T any](ctx context.Context, client *anthropic.Client, scope, id string, list func(context.Context) (map[string]T, error)) (*T, error) {
 	value, _ := listCache.LoadOrStore(listCacheKey{client, scope}, &listCacheEntry{})
-	entry := value.(*listCacheEntry)
+	entry, _ := value.(*listCacheEntry)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if entry.items == nil {
