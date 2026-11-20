@@ -17,8 +17,7 @@ type Pager[V any] interface {
 // Concurrent Gets for the same scope share a single List call.
 type ListCache[V any] struct {
 	key   func(V) string
-	mu    sync.Mutex
-	fills map[string]*listFill[V]
+	fills sync.Map // scope -> *listFill[V]
 }
 
 type listFill[V any] struct {
@@ -28,27 +27,21 @@ type listFill[V any] struct {
 }
 
 func NewListCache[V any](key func(V) string) *ListCache[V] {
-	return &ListCache[V]{key: key, fills: map[string]*listFill[V]{}}
+	return &ListCache[V]{key: key}
 }
 
 // Get returns the item with the given id in scope, listing the scope on first
 // use. A missing item yields an error that IsNotFoundError recognises.
 func (c *ListCache[V]) Get(scope, id string, list func() Pager[V]) (*V, error) {
-	c.mu.Lock()
-	f, ok := c.fills[scope]
-	if !ok {
-		f = &listFill[V]{}
-		c.fills[scope] = f
-	}
-	c.mu.Unlock()
-
+	fill, _ := c.fills.LoadOrStore(scope, &listFill[V]{})
+	f := fill.(*listFill[V])
 	f.once.Do(func() {
 		pager := list()
-		items := map[string]V{}
+		f.items = map[string]V{}
 		for pager.Next() {
-			items[c.key(pager.Current())] = pager.Current()
+			f.items[c.key(pager.Current())] = pager.Current()
 		}
-		f.items, f.err = items, pager.Err()
+		f.err = pager.Err()
 	})
 	if f.err != nil {
 		return nil, f.err
@@ -62,7 +55,5 @@ func (c *ListCache[V]) Get(scope, id string, list func() Pager[V]) (*V, error) {
 
 // Reset discards every cached scope so later reads list again.
 func (c *ListCache[V]) Reset() {
-	c.mu.Lock()
-	c.fills = map[string]*listFill[V]{}
-	c.mu.Unlock()
+	c.fills.Clear()
 }
