@@ -31,24 +31,34 @@ func (r *ServiceAccountResource) Schema(ctx context.Context, req resource.Schema
 
 func (r *ServiceAccountResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	fwresource.Create(ctx, func(_ *ServiceAccountModel, body *anthropic.OrganizationServiceAccountNewParams) (*anthropic.ServiceAccount, error) {
+		defer invalidateList(r.authTokenClient, "service_account")
 		return r.authTokenClient.Organization.ServiceAccounts.New(ctx, *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	fwresource.Read(ctx, func(data *ServiceAccountModel) (*anthropic.ServiceAccount, error) {
-		return r.authTokenClient.Organization.ServiceAccounts.Get(ctx, data.Id.ValueString())
+		return cachedGet(ctx, r.authTokenClient, "service_account", data.Id.ValueString(), func(ctx context.Context) (map[string]anthropic.ServiceAccount, error) {
+			items := map[string]anthropic.ServiceAccount{}
+			iter := r.authTokenClient.Organization.ServiceAccounts.ListAutoPaging(ctx, anthropic.OrganizationServiceAccountListParams{IncludeArchived: anthropic.Bool(true)})
+			for iter.Next() {
+				items[iter.Current().ID] = iter.Current()
+			}
+			return items, iter.Err()
+		})
 	}, req, resp)
 }
 
 func (r *ServiceAccountResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	fwresource.Update(ctx, func(data *ServiceAccountModel, body *anthropic.OrganizationServiceAccountUpdateParams) (*anthropic.ServiceAccount, error) {
+		defer invalidateList(r.authTokenClient, "service_account")
 		return r.authTokenClient.Organization.ServiceAccounts.Update(ctx, data.Id.ValueString(), *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	fwresource.Delete(ctx, func(data *ServiceAccountModel) error {
+		defer invalidateList(r.authTokenClient, "service_account")
 		_, err := r.authTokenClient.Organization.ServiceAccounts.Archive(ctx, data.Id.ValueString())
 		return err
 	}, req, resp)

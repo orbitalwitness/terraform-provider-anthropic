@@ -30,6 +30,10 @@ func Read[M ModelFromAPI[T], T any](
 		}
 		return
 	}
+	if item == nil {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 
 	resp.Diagnostics.Append(data.FromAPI(ctx, *item)...)
 	if resp.Diagnostics.HasError() {

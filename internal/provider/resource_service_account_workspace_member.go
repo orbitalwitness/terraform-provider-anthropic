@@ -32,30 +32,34 @@ func (r *ServiceAccountWorkspaceMemberResource) Schema(ctx context.Context, req 
 
 func (r *ServiceAccountWorkspaceMemberResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	fwresource.Create(ctx, func(data *ServiceAccountWorkspaceMemberModel, body *anthropic.OrganizationWorkspaceServiceAccountAddParams) (*anthropic.ServiceAccountWorkspaceMember, error) {
+		defer invalidateList(r.authTokenClient, "service_account_workspace_member/"+data.WorkspaceId.ValueString())
 		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Add(ctx, data.WorkspaceId.ValueString(), *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	fwresource.Read(ctx, func(data *ServiceAccountWorkspaceMemberModel) (*anthropic.ServiceAccountWorkspaceMember, error) {
-		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Get(
-			ctx,
-			data.ServiceAccountId.ValueString(),
-			anthropic.OrganizationWorkspaceServiceAccountGetParams{
-				WorkspaceID: data.WorkspaceId.ValueString(),
-			},
-		)
+		return cachedGet(ctx, r.authTokenClient, "service_account_workspace_member/"+data.WorkspaceId.ValueString(), data.ServiceAccountId.ValueString(), func(ctx context.Context) (map[string]anthropic.ServiceAccountWorkspaceMember, error) {
+			items := map[string]anthropic.ServiceAccountWorkspaceMember{}
+			iter := r.authTokenClient.Organization.Workspaces.ServiceAccounts.ListAutoPaging(ctx, data.WorkspaceId.ValueString(), anthropic.OrganizationWorkspaceServiceAccountListParams{})
+			for iter.Next() {
+				items[iter.Current().ServiceAccountID] = iter.Current()
+			}
+			return items, iter.Err()
+		})
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	fwresource.Update(ctx, func(data *ServiceAccountWorkspaceMemberModel, body *anthropic.OrganizationWorkspaceServiceAccountUpdateParams) (*anthropic.ServiceAccountWorkspaceMember, error) {
+		defer invalidateList(r.authTokenClient, "service_account_workspace_member/"+data.WorkspaceId.ValueString())
 		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Update(ctx, data.ServiceAccountId.ValueString(), *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	fwresource.Delete(ctx, func(data *ServiceAccountWorkspaceMemberModel) error {
+		defer invalidateList(r.authTokenClient, "service_account_workspace_member/"+data.WorkspaceId.ValueString())
 		_, err := r.authTokenClient.Organization.Workspaces.ServiceAccounts.Remove(
 			ctx,
 			data.ServiceAccountId.ValueString(),

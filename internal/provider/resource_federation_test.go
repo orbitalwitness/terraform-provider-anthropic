@@ -87,6 +87,13 @@ func TestFederationResources(t *testing.T) {
 			if workspace, ok := body["workspace_id"].(string); ok {
 				objects[kind]["workspace_ids"] = []string{workspace}
 			}
+		case r.Method == http.MethodGet && len(parts) == 1:
+			data := []any{}
+			if objects[kind] != nil && objects[kind]["archived_at"] == nil {
+				data = append(data, objects[kind])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "next_page": nil})
+			return
 		case r.Method == http.MethodGet && len(parts) == 2:
 			if objects[kind] == nil {
 				w.WriteHeader(404)
@@ -170,7 +177,11 @@ func TestFederationReadMissingAndArchived(t *testing.T) {
 					case "forbidden":
 						w.WriteHeader(http.StatusForbidden)
 						_, _ = w.Write([]byte(`{"type":"error","error":{"type":"permission_error","message":"forbidden"}}`))
-					default:
+					case "archived":
+						if kind == "rule" {
+							_, _ = w.Write([]byte(`{"data":[],"next_page":null}`))
+							return
+						}
 						_, _ = w.Write([]byte(`{"id":"test","archived_at":"2026-11-05T13:00:00Z"}`))
 					}
 				}))

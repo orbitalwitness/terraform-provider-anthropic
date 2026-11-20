@@ -8,7 +8,6 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/hashicorp/go-retryablehttp"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -117,20 +116,10 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	transport := http.DefaultTransport
-
-	// Logging
-	transport = logging.NewLoggingHTTPTransport(transport)
-
-	// Retry
-	retryClient := retryablehttp.NewClient()
-	retryClient.HTTPClient = &http.Client{Transport: transport}
-	retryClient.ErrorHandler = retryablehttp.PassthroughErrorHandler
-	retryClient.Logger = nil
-	retryClient.RetryMax = 10
-	transport = retryClient.StandardClient().Transport
-
-	options = append(options, option.WithHTTPClient(&http.Client{Transport: transport}))
+	options = append(options,
+		option.WithHTTPClient(&http.Client{Transport: logging.NewLoggingHTTPTransport(http.DefaultTransport)}),
+		option.WithMaxRetries(5),
+	)
 
 	apiKeyClient := anthropic.NewClient(append(options, option.WithAPIKey(apiKey))...)
 	authTokenClient := anthropic.NewClient(append(options, option.WithAuthToken(authToken))...)
