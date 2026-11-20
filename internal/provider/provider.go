@@ -8,7 +8,6 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/hashicorp/go-retryablehttp"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -16,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/providerdata"
 )
 
@@ -117,20 +117,10 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	transport := http.DefaultTransport
-
-	// Logging
-	transport = logging.NewLoggingHTTPTransport(transport)
-
-	// Retry
-	retryClient := retryablehttp.NewClient()
-	retryClient.HTTPClient = &http.Client{Transport: transport}
-	retryClient.ErrorHandler = retryablehttp.PassthroughErrorHandler
-	retryClient.Logger = nil
-	retryClient.RetryMax = 10
-	transport = retryClient.StandardClient().Transport
-
-	options = append(options, option.WithHTTPClient(&http.Client{Transport: transport}))
+	options = append(options,
+		option.WithHTTPClient(&http.Client{Transport: logging.NewLoggingHTTPTransport(http.DefaultTransport)}),
+		option.WithMaxRetries(5),
+	)
 
 	apiKeyClient := anthropic.NewClient(append(options, option.WithAPIKey(apiKey))...)
 	authTokenClient := anthropic.NewClient(append(options, option.WithAuthToken(authToken))...)
@@ -140,6 +130,12 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		AuthToken:       authToken,
 		ApiKeyClient:    &apiKeyClient,
 		AuthTokenClient: &authTokenClient,
+
+		ServiceAccounts: apiclient.NewListCache(func(v anthropic.ServiceAccount) string { return v.ID }),
+		ServiceAccountWorkspaceMembers: apiclient.NewListCache(func(v anthropic.ServiceAccountWorkspaceMember) string {
+			return v.ServiceAccountID
+		}),
+		FederationRules: apiclient.NewListCache(func(v anthropic.FederationRule) string { return v.ID }),
 	}
 
 	resp.DataSourceData = providerData

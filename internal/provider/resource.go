@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/providerdata"
 )
 
 type baseResource struct {
 	base
+	serviceAccounts                *apiclient.ListCache[anthropic.ServiceAccount]
+	serviceAccountWorkspaceMembers *apiclient.ListCache[anthropic.ServiceAccountWorkspaceMember]
+	federationRules                *apiclient.ListCache[anthropic.FederationRule]
 }
 
 func (r *baseResource) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -33,4 +38,7 @@ func (r *baseResource) Configure(ctx context.Context, req resource.ConfigureRequ
 	r.authToken = providerData.AuthToken
 	r.apiKeyClient = providerData.ApiKeyClient
 	r.authTokenClient = providerData.AuthTokenClient
+	r.serviceAccounts = providerData.ServiceAccounts
+	r.serviceAccountWorkspaceMembers = providerData.ServiceAccountWorkspaceMembers
+	r.federationRules = providerData.FederationRules
 }

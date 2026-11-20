@@ -7,6 +7,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/fwresource"
 )
 
@@ -32,30 +33,30 @@ func (r *ServiceAccountWorkspaceMemberResource) Schema(ctx context.Context, req 
 
 func (r *ServiceAccountWorkspaceMemberResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	fwresource.Create(ctx, func(data *ServiceAccountWorkspaceMemberModel, body *anthropic.OrganizationWorkspaceServiceAccountAddParams) (*anthropic.ServiceAccountWorkspaceMember, error) {
+		defer r.serviceAccountWorkspaceMembers.Reset()
 		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Add(ctx, data.WorkspaceId.ValueString(), *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	fwresource.Read(ctx, func(data *ServiceAccountWorkspaceMemberModel) (*anthropic.ServiceAccountWorkspaceMember, error) {
-		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Get(
-			ctx,
-			data.ServiceAccountId.ValueString(),
-			anthropic.OrganizationWorkspaceServiceAccountGetParams{
-				WorkspaceID: data.WorkspaceId.ValueString(),
-			},
-		)
+		workspaceId := data.WorkspaceId.ValueString()
+		return r.serviceAccountWorkspaceMembers.Get(workspaceId, data.ServiceAccountId.ValueString(), func() apiclient.Pager[anthropic.ServiceAccountWorkspaceMember] {
+			return r.authTokenClient.Organization.Workspaces.ServiceAccounts.ListAutoPaging(ctx, workspaceId, anthropic.OrganizationWorkspaceServiceAccountListParams{})
+		})
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	fwresource.Update(ctx, func(data *ServiceAccountWorkspaceMemberModel, body *anthropic.OrganizationWorkspaceServiceAccountUpdateParams) (*anthropic.ServiceAccountWorkspaceMember, error) {
+		defer r.serviceAccountWorkspaceMembers.Reset()
 		return r.authTokenClient.Organization.Workspaces.ServiceAccounts.Update(ctx, data.ServiceAccountId.ValueString(), *body)
 	}, req, resp)
 }
 
 func (r *ServiceAccountWorkspaceMemberResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	fwresource.Delete(ctx, func(data *ServiceAccountWorkspaceMemberModel) error {
+		defer r.serviceAccountWorkspaceMembers.Reset()
 		_, err := r.authTokenClient.Organization.Workspaces.ServiceAccounts.Remove(
 			ctx,
 			data.ServiceAccountId.ValueString(),

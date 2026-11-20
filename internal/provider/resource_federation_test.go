@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 )
 
 // Exercise Terraform plans and state against the SDK's real HTTP transport.
@@ -87,6 +88,13 @@ func TestFederationResources(t *testing.T) {
 			if workspace, ok := body["workspace_id"].(string); ok {
 				objects[kind]["workspace_ids"] = []string{workspace}
 			}
+		case r.Method == http.MethodGet && len(parts) == 1:
+			data := []any{}
+			if objects[kind] != nil && objects[kind]["archived_at"] == nil {
+				data = append(data, objects[kind])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "next_page": nil})
+			return
 		case r.Method == http.MethodGet && len(parts) == 2:
 			if objects[kind] == nil {
 				w.WriteHeader(404)
@@ -170,7 +178,11 @@ func TestFederationReadMissingAndArchived(t *testing.T) {
 					case "forbidden":
 						w.WriteHeader(http.StatusForbidden)
 						_, _ = w.Write([]byte(`{"type":"error","error":{"type":"permission_error","message":"forbidden"}}`))
-					default:
+					case "archived":
+						if kind == "rule" {
+							_, _ = w.Write([]byte(`{"data":[],"next_page":null}`))
+							return
+						}
 						_, _ = w.Write([]byte(`{"id":"test","archived_at":"2026-11-05T13:00:00Z"}`))
 					}
 				}))
@@ -183,7 +195,10 @@ func TestFederationReadMissingAndArchived(t *testing.T) {
 					r = &FederationIssuerResource{baseResource: baseResource{base: base{authTokenClient: &client}}}
 					model = &FederationIssuerModel{Id: types.StringValue("test")}
 				} else {
-					r = &FederationRuleResource{baseResource: baseResource{base: base{authTokenClient: &client}}}
+					r = &FederationRuleResource{baseResource: baseResource{
+						base:            base{authTokenClient: &client},
+						federationRules: apiclient.NewListCache(func(v anthropic.FederationRule) string { return v.ID }),
+					}}
 					model = &FederationRuleModel{Id: types.StringValue("test")}
 				}
 				var schemaResp frameworkresource.SchemaResponse
