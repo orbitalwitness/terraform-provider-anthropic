@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -28,7 +27,7 @@ const (
 )
 
 func attrOrEnv(v types.String, env string) string {
-	if !v.IsNull() && !v.IsUnknown() {
+	if !v.IsNull() {
 		return v.ValueString()
 	}
 	return os.Getenv(env)
@@ -38,19 +37,51 @@ func attrSet(v types.String) bool {
 	return !v.IsNull() && !v.IsUnknown() && v.ValueString() != ""
 }
 
+// unknownAttributes names the provider attributes whose values are not yet
+// known, such as ones set from another resource during the first plan.
+func unknownAttributes(data *AnthropicProviderModel) []string {
+	var unknown []string
+	for _, attr := range []struct {
+		name  string
+		value types.String
+	}{
+		{"base_url", data.BaseUrl},
+		{"api_key", data.ApiKey},
+		{"auth_token", data.AuthToken},
+		{"federation_rule_id", data.FederationRuleId},
+		{"organization_id", data.OrganizationId},
+		{"service_account_id", data.ServiceAccountId},
+		{"workspace_id", data.WorkspaceId},
+		{"identity_token", data.IdentityToken},
+		{"identity_token_file", data.IdentityTokenFile},
+	} {
+		if attr.value.IsUnknown() {
+			unknown = append(unknown, attr.name)
+		}
+	}
+	return unknown
+}
+
 // identityTokenSource returns nil when no identity token is configured.
 func identityTokenSource(data *AnthropicProviderModel) (option.IdentityTokenFunc, error) {
+	token, tokenFrom := attrOrEnv(data.IdentityToken, envIdentityToken), "identity_token"
+	if data.IdentityToken.IsNull() {
+		tokenFrom = envIdentityToken
+	}
+	file, fileFrom := attrOrEnv(data.IdentityTokenFile, envIdentityTokenFile), "identity_token_file"
+	if data.IdentityTokenFile.IsNull() {
+		fileFrom = envIdentityTokenFile
+	}
+
 	switch {
-	case attrSet(data.IdentityToken) && attrSet(data.IdentityTokenFile):
-		return nil, errors.New("identity_token and identity_token_file cannot both be set")
+	case token != "" && file != "":
+		return nil, fmt.Errorf("%s and %s cannot both be set", tokenFrom, fileFrom)
+	case file != "":
+		return option.IdentityTokenFile(file), nil
 	case attrSet(data.IdentityToken):
-		token := strings.TrimSpace(data.IdentityToken.ValueString())
+		token = strings.TrimSpace(token)
 		return func(context.Context) (string, error) { return token, nil }, nil
-	case attrSet(data.IdentityTokenFile):
-		return option.IdentityTokenFile(data.IdentityTokenFile.ValueString()), nil
-	case os.Getenv(envIdentityTokenFile) != "":
-		return option.IdentityTokenFile(os.Getenv(envIdentityTokenFile)), nil
-	case os.Getenv(envIdentityToken) != "":
+	case token != "":
 		return func(context.Context) (string, error) {
 			token := strings.TrimSpace(os.Getenv(envIdentityToken))
 			if token == "" {

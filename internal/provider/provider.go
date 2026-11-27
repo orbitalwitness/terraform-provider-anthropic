@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/providerdata"
 )
 
@@ -102,6 +104,18 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
+	if unknown := unknownAttributes(&data); len(unknown) > 0 {
+		if req.ClientCapabilities.DeferralAllowed {
+			resp.Deferred = &provider.Deferred{Reason: provider.DeferredReasonProviderConfigUnknown}
+			return
+		}
+		resp.Diagnostics.AddError("Unknown provider configuration",
+			"The provider cannot be configured because "+strings.Join(unknown, ", ")+" will only be known after apply, "+
+				"and it does not fall back to the ANTHROPIC_* environment variables for unknown values. "+
+				"Set them from values known at plan time, or apply the resources they depend on first with -target.")
+		return
+	}
+
 	options := []option.RequestOption{
 		option.WithoutEnvironmentDefaults(),
 	}
@@ -155,17 +169,11 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	options = append(options,
-		option.WithHTTPClient(&http.Client{Transport: newRedactingTransport(http.DefaultTransport)}),
-		option.WithMaxRetries(5),
-	)
-
-	apiKeyClient := anthropic.NewClient(append(options, option.WithAPIKey(apiKey))...)
 	authTokenCredential := option.WithAuthToken(authToken)
 	if federation != nil {
 		authTokenCredential = federation
 	}
-	authTokenClient := anthropic.NewClient(append(options, authTokenCredential)...)
+	apiKeyClient, authTokenClient := newClients(options, apiKey, authTokenCredential)
 
 	providerData := &providerdata.ProviderData{
 		ApiKey:          apiKey,
@@ -176,6 +184,18 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
+}
+
+// newClients builds the Admin API key client and the OAuth client. Both log
+// requests through the redacting transport.
+func newClients(options []option.RequestOption, apiKey string, authTokenCredential option.RequestOption) (apiKeyClient, authTokenClient anthropic.Client) {
+	options = slices.Clip(append(options,
+		option.WithHTTPClient(&http.Client{Transport: newRedactingTransport(http.DefaultTransport)}),
+		option.WithMaxRetries(5),
+	))
+	apiKeyClient = anthropic.NewClient(append(options, apiclient.WithAdminAPIKey(apiKey))...)
+	authTokenClient = anthropic.NewClient(append(options, authTokenCredential)...)
+	return apiKeyClient, authTokenClient
 }
 
 func (p *AnthropicProvider) Resources(ctx context.Context) []func() resource.Resource {
