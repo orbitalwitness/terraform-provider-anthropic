@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 type base struct {

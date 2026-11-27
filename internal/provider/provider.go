@@ -4,17 +4,18 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/function"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-anthropic/internal/providerdata"
 )
 
@@ -32,9 +33,15 @@ type AnthropicProvider struct {
 
 // AnthropicProviderModel describes the provider data model.
 type AnthropicProviderModel struct {
-	BaseUrl   types.String `tfsdk:"base_url"`
-	ApiKey    types.String `tfsdk:"api_key"`
-	AuthToken types.String `tfsdk:"auth_token"`
+	BaseUrl           types.String `tfsdk:"base_url"`
+	ApiKey            types.String `tfsdk:"api_key"`
+	AuthToken         types.String `tfsdk:"auth_token"`
+	FederationRuleId  types.String `tfsdk:"federation_rule_id"`
+	OrganizationId    types.String `tfsdk:"organization_id"`
+	ServiceAccountId  types.String `tfsdk:"service_account_id"`
+	WorkspaceId       types.String `tfsdk:"workspace_id"`
+	IdentityToken     types.String `tfsdk:"identity_token"`
+	IdentityTokenFile types.String `tfsdk:"identity_token_file"`
 }
 
 func (p *AnthropicProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -56,9 +63,34 @@ func (p *AnthropicProvider) Schema(ctx context.Context, req provider.SchemaReque
 				Sensitive:           true,
 			},
 			"auth_token": schema.StringAttribute{
-				MarkdownDescription: "The OAuth bearer token for authentication. Log in with the `ant` CLI under a dedicated profile with the `org:admin` scope (see [Admin access](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication#admin-access)), then export the bearer token It can be sourced from the `ANTHROPIC_AUTH_TOKEN` environment variable.",
+				MarkdownDescription: "The OAuth bearer token for authentication. Log in with the `ant` CLI under a dedicated profile with the `org:admin` scope (see [Admin access](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/authentication#admin-access)), then export the bearer token. It can be sourced from the `ANTHROPIC_AUTH_TOKEN` environment variable. Conflicts with workload identity federation.",
 				Optional:            true,
 				Sensitive:           true,
+			},
+			"federation_rule_id": schema.StringAttribute{
+				MarkdownDescription: "The ID (`fdrl_...`) of the federation rule used to exchange `identity_token` or `identity_token_file` for a short-lived OAuth token through workload identity federation. Replaces `auth_token`. It can be sourced from the `ANTHROPIC_FEDERATION_RULE_ID` environment variable.",
+				Optional:            true,
+			},
+			"organization_id": schema.StringAttribute{
+				MarkdownDescription: "The UUID of the Anthropic organisation the federation rule belongs to. Required with `federation_rule_id`. It can be sourced from the `ANTHROPIC_ORGANIZATION_ID` environment variable.",
+				Optional:            true,
+			},
+			"service_account_id": schema.StringAttribute{
+				MarkdownDescription: "The ID (`svac_...`) of the service account a service-account federation rule targets. Optional; the exchange fails if the rule targets a different service account. It can be sourced from the `ANTHROPIC_SERVICE_ACCOUNT_ID` environment variable.",
+				Optional:            true,
+			},
+			"workspace_id": schema.StringAttribute{
+				MarkdownDescription: "The ID (`wrkspc_...`), or `default`, of the workspace the exchanged token is scoped to. Required only when the federation rule covers more than one workspace. It can be sourced from the `ANTHROPIC_WORKSPACE_ID` environment variable.",
+				Optional:            true,
+			},
+			"identity_token": schema.StringAttribute{
+				MarkdownDescription: "The OIDC identity token (JWT) to exchange, such as Scalr's `SCALR_OIDC_TOKEN`. Pass it through an ephemeral variable so that each run phase uses its own token. The provider re-exchanges the same token shortly before the minted OAuth token expires, which the issuer rejects once the token has expired or, with `check_jti`, been used, so keep runs shorter than the minted token's lifetime. Conflicts with `identity_token_file`. It can be sourced from the `ANTHROPIC_IDENTITY_TOKEN` environment variable, which is re-read on every exchange.",
+				Optional:            true,
+				Sensitive:           true,
+			},
+			"identity_token_file": schema.StringAttribute{
+				MarkdownDescription: "The path to a file holding the OIDC identity token (JWT) to exchange. The file is re-read on every exchange, so a rotated token is picked up. Conflicts with `identity_token`. It can be sourced from the `ANTHROPIC_IDENTITY_TOKEN_FILE` environment variable.",
+				Optional:            true,
 			},
 		},
 	}
@@ -69,6 +101,18 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if unknown := unknownAttributes(&data); len(unknown) > 0 {
+		if req.ClientCapabilities.DeferralAllowed {
+			resp.Deferred = &provider.Deferred{Reason: provider.DeferredReasonProviderConfigUnknown}
+			return
+		}
+		resp.Diagnostics.AddError("Unknown provider configuration",
+			"The provider cannot be configured because "+strings.Join(unknown, ", ")+" will only be known after apply, "+
+				"and it does not fall back to the ANTHROPIC_* environment variables for unknown values. "+
+				"Set them from values known at plan time, or apply the resources they depend on first with -target.")
 		return
 	}
 
@@ -116,13 +160,20 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	options = append(options,
-		option.WithHTTPClient(&http.Client{Transport: logging.NewLoggingHTTPTransport(http.DefaultTransport)}),
-		option.WithMaxRetries(5),
-	)
+	federation, ok := federationOption(&data, &resp.Diagnostics)
+	if !ok {
+		return
+	}
+	if federation != nil && authToken != "" {
+		resp.Diagnostics.AddError("Conflicting authentication", "auth_token cannot be combined with workload identity federation. Remove auth_token (or ANTHROPIC_AUTH_TOKEN), or the federation settings.")
+		return
+	}
 
-	apiKeyClient := anthropic.NewClient(append(options, option.WithAPIKey(apiKey))...)
-	authTokenClient := anthropic.NewClient(append(options, option.WithAuthToken(authToken))...)
+	authTokenCredential := option.WithAuthToken(authToken)
+	if federation != nil {
+		authTokenCredential = federation
+	}
+	apiKeyClient, authTokenClient := newClients(options, apiKey, authTokenCredential)
 
 	providerData := &providerdata.ProviderData{
 		ApiKey:          apiKey,
@@ -133,6 +184,18 @@ func (p *AnthropicProvider) Configure(ctx context.Context, req provider.Configur
 
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
+}
+
+// newClients builds the Admin API key client and the OAuth client. Both log
+// requests through the redacting transport.
+func newClients(options []option.RequestOption, apiKey string, authTokenCredential option.RequestOption) (apiKeyClient, authTokenClient anthropic.Client) {
+	options = slices.Clip(append(options,
+		option.WithHTTPClient(&http.Client{Transport: newRedactingTransport(http.DefaultTransport)}),
+		option.WithMaxRetries(5),
+	))
+	apiKeyClient = anthropic.NewClient(append(options, apiclient.WithAdminAPIKey(apiKey))...)
+	authTokenClient = anthropic.NewClient(append(options, authTokenCredential)...)
+	return apiKeyClient, authTokenClient
 }
 
 func (p *AnthropicProvider) Resources(ctx context.Context) []func() resource.Resource {

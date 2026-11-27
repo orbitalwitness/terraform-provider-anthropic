@@ -4,8 +4,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
+	"github.com/jianyuan/terraform-provider-anthropic/internal/apiclient"
 )
 
 var (
@@ -18,7 +19,7 @@ var (
 func init() {
 	SharedApiKeyClient = new(anthropic.NewClient(
 		option.WithoutEnvironmentDefaults(),
-		option.WithAPIKey(TestApiKey),
+		apiclient.WithAdminAPIKey(TestApiKey),
 	))
 }
 
